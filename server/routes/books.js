@@ -11,12 +11,9 @@ const { protect, admin } = require('../middleware/auth');
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadsPath = path.join(__dirname, '../uploads');
-    
-    // Tạo folder uploads nếu chưa tồn tại
     if (!fs.existsSync(uploadsPath)) {
       fs.mkdirSync(uploadsPath, { recursive: true });
     }
-    
     cb(null, uploadsPath);
   },
   filename: function (req, file, cb) {
@@ -25,10 +22,9 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   fileFilter: function (req, file, cb) {
-    // Chỉ chấp nhận file ảnh
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -42,23 +38,28 @@ router.get('/', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 12;
-    const sortBy = req.query.sort || 'createdAt';
+    const sortBy = req.query.sortBy || 'createdAt';
     const order = req.query.order || 'desc';
     const search = req.query.search || '';
     const category = req.query.category || '';
     
-    const sortString = order === 'desc' ? `-${sortBy}` : sortBy;
+    let sortString = 'createdAt';
+    if (sortBy === 'price') {
+      sortString = order === 'desc' ? '-price' : 'price';
+    } else if (sortBy === 'title') {
+      sortString = order === 'desc' ? '-title' : 'title';
+    } else if (sortBy === 'createdAt') {
+      sortString = order === 'desc' ? '-createdAt' : 'createdAt';
+    }
+    
     const skip = (page - 1) * limit;
 
-    // Xây dựng query
     const query = {};
 
-    // Filter theo category
     if (category && category !== 'all') {
       query.category = category;
     }
 
-    // Tìm kiếm theo title hoặc author
     if (search) {
       query.$or = [
         { title: { $regex: search, $options: 'i' } },
@@ -91,6 +92,74 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ✅ GET SÁCH BÁN CHẠY (theo số lượng sold)
+router.get('/best-selling', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 9;
+    
+    const books = await Book.find({ stock: { $gt: 0 } })
+      .populate('category', 'name')
+      .sort({ sold: -1 })
+      .limit(limit);
+
+    res.json(books);
+  } catch (err) {
+    console.error('Lỗi lấy sách bán chạy:', err);
+    res.status(500).json({ msg: 'Lỗi server khi lấy sách bán chạy' });
+  }
+});
+
+// ✅ GET SÁCH CÒN HÀNG (stock > 0)
+router.get('/in-stock', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const sortBy = req.query.sortBy || 'createdAt';
+    const order = req.query.order || 'desc';
+    const category = req.query.category || '';
+    
+    let sortString = 'createdAt';
+    if (sortBy === 'price') {
+      sortString = order === 'desc' ? '-price' : 'price';
+    } else if (sortBy === 'title') {
+      sortString = order === 'desc' ? '-title' : 'title';
+    } else if (sortBy === 'createdAt') {
+      sortString = order === 'desc' ? '-createdAt' : 'createdAt';
+    }
+    
+    const skip = (page - 1) * limit;
+
+    const query = { stock: { $gt: 0 } };
+
+    if (category && category !== 'all') {
+      query.category = category;
+    }
+
+    const [books, total] = await Promise.all([
+      Book.find(query)
+        .populate('category', 'name')
+        .sort(sortString)
+        .skip(skip)
+        .limit(limit),
+      Book.countDocuments(query)
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      books,
+      currentPage: page,
+      totalPages,
+      totalBooks: total,
+      hasNext: page < totalPages,
+      hasPrev: page > 1
+    });
+  } catch (err) {
+    console.error('Lỗi lấy sách còn hàng:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // GET categories
 router.get('/categories', async (req, res) => {
   try {
@@ -105,11 +174,9 @@ router.get('/categories', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const book = await Book.findById(req.params.id).populate('category', 'name');
-    
     if (!book) {
       return res.status(404).json({ msg: 'Không tìm thấy sách' });
     }
-
     res.json(book);
   } catch (err) {
     console.error('Lỗi chi tiết sách:', err);
@@ -121,14 +188,13 @@ router.get('/:id', async (req, res) => {
 router.post('/', protect, admin, upload.single('image'), async (req, res) => {
   try {
     const { title, author, price, description, stock, category, publisher } = req.body;
-
-    // Kiểm tra các trường bắt buộc
+    
     if (!title || !author || !price || !category) {
       return res.status(400).json({ msg: 'Vui lòng điền đầy đủ thông tin bắt buộc' });
     }
 
     let imageName = 'default-book.jpg';
-    
+
     if (req.file) {
       const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
       if (!allowedTypes.includes(req.file.mimetype)) {
@@ -160,7 +226,6 @@ router.post('/', protect, admin, upload.single('image'), async (req, res) => {
 router.put('/:id', protect, admin, upload.single('image'), async (req, res) => {
   try {
     const book = await Book.findById(req.params.id);
-    
     if (!book) {
       return res.status(404).json({ msg: 'Không tìm thấy sách' });
     }
@@ -171,7 +236,7 @@ router.put('/:id', protect, admin, upload.single('image'), async (req, res) => {
     book.author = author || book.author;
     book.price = price ? Number(price) : book.price;
     book.description = description !== undefined ? description : book.description;
-    book.stock = stock ? Number(stock) : book.stock;
+    book.stock = stock !== undefined ? Number(stock) : book.stock;
     book.category = category || book.category;
     book.publisher = publisher !== undefined ? publisher : book.publisher;
 
@@ -180,10 +245,9 @@ router.put('/:id', protect, admin, upload.single('image'), async (req, res) => {
     }
 
     await book.save();
-    
-    // Populate category trước khi trả về
+
     const updatedBook = await Book.findById(book._id).populate('category', 'name');
-    
+
     res.json(updatedBook);
   } catch (err) {
     console.error('Lỗi cập nhật sách:', err);
@@ -195,12 +259,10 @@ router.put('/:id', protect, admin, upload.single('image'), async (req, res) => {
 router.delete('/:id', protect, admin, async (req, res) => {
   try {
     const book = await Book.findById(req.params.id);
-    
     if (!book) {
       return res.status(404).json({ msg: 'Không tìm thấy sách' });
     }
 
-    // Xóa file ảnh nếu tồn tại (không xóa default-book.jpg)
     if (book.image && book.image !== 'default-book.jpg') {
       const imagePath = path.join(__dirname, '../uploads', book.image);
       if (fs.existsSync(imagePath)) {
@@ -220,13 +282,12 @@ router.delete('/:id', protect, admin, async (req, res) => {
 router.post('/categories', protect, admin, async (req, res) => {
   try {
     const { name } = req.body;
-    
     if (!name || !name.trim()) {
       return res.status(400).json({ msg: 'Tên danh mục không được để trống' });
     }
 
     const existing = await Category.findOne({ name: new RegExp('^' + name.trim() + '$', 'i') });
-    
+
     if (existing) {
       return res.status(400).json({ msg: 'Danh mục này đã tồn tại' });
     }
@@ -244,7 +305,6 @@ router.post('/categories', protect, admin, async (req, res) => {
 router.put('/categories/:id', protect, admin, async (req, res) => {
   try {
     const { name } = req.body;
-    
     if (!name || !name.trim()) {
       return res.status(400).json({ msg: 'Tên danh mục không được để trống' });
     }
@@ -269,14 +329,12 @@ router.put('/categories/:id', protect, admin, async (req, res) => {
 router.delete('/categories/:id', protect, admin, async (req, res) => {
   try {
     const category = await Category.findById(req.params.id);
-    
     if (!category) {
       return res.status(404).json({ msg: 'Không tìm thấy danh mục' });
     }
 
-    // Kiểm tra xem danh mục có đang được sử dụng không
     const bookCount = await Book.countDocuments({ category: req.params.id });
-    
+
     if (bookCount > 0) {
       return res.status(400).json({ 
         msg: `Không thể xóa danh mục này vì đang có ${bookCount} sách thuộc danh mục.` 

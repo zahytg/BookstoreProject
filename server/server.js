@@ -12,7 +12,9 @@ app.use('/uploads', express.static(uploadsPath));
 
 // CORS
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: ['http://localhost:5173',     // customer app
+            'http://localhost:5174',    // admin app
+          ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true

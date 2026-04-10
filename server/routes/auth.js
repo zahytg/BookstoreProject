@@ -3,13 +3,12 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { protect } = require('../middleware/auth');
+const { protect, admin } = require('../middleware/auth');
 
 // ====================== REGISTER ======================
 router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    
     if (!name || !email || !password) {
       return res.status(400).json({ msg: 'Vui lòng nhập đầy đủ thông tin' });
     }
@@ -60,6 +59,11 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ msg: 'Email hoặc mật khẩu không đúng' });
 
+    // ✅ KIỂM TRA USER BỊ CHẶN
+    if (user.isBlocked) {
+      return res.status(403).json({ msg: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ admin.' });
+    }
+
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ msg: 'Email hoặc mật khẩu không đúng' });
 
@@ -75,7 +79,8 @@ router.post('/login', async (req, res) => {
         id: user._id, 
         name: user.name, 
         email: user.email, 
-        role: user.role 
+        role: user.role,
+        isBlocked: user.isBlocked
       }
     });
   } catch (err) {
@@ -88,14 +93,23 @@ router.post('/login', async (req, res) => {
 router.get('/profile', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
-    
     if (!user) {
       return res.status(404).json({ msg: 'Không tìm thấy user' });
     }
-    
     res.json(user);
   } catch (err) {
     console.error('=== LỖI GET PROFILE ===', err);
+    res.status(500).json({ msg: 'Lỗi server' });
+  }
+});
+
+// ====================== GET ALL USERS (ADMIN ONLY) ======================
+router.get('/users', protect, admin, async (req, res) => {
+  try {
+    const users = await User.find().select('-password').sort('-createdAt');
+    res.json(users);
+  } catch (err) {
+    console.error('=== LỖI GET ALL USERS ===', err);
     res.status(500).json({ msg: 'Lỗi server' });
   }
 });
@@ -105,7 +119,6 @@ router.put('/profile', protect, async (req, res) => {
   try {
     const { name, phone, address } = req.body;
     const user = await User.findById(req.user.id);
-
     if (!user) {
       return res.status(404).json({ msg: 'Không tìm thấy user' });
     }
@@ -137,18 +150,15 @@ router.put('/change-password', protect, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const user = await User.findById(req.user.id);
-
     if (!user) {
       return res.status(404).json({ msg: 'Không tìm thấy user' });
     }
 
-    // Kiểm tra mật khẩu hiện tại
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ msg: 'Mật khẩu hiện tại không đúng' });
     }
 
-    // Cập nhật mật khẩu mới
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
     await user.save();
@@ -156,6 +166,76 @@ router.put('/change-password', protect, async (req, res) => {
     res.json({ msg: 'Đổi mật khẩu thành công' });
   } catch (err) {
     console.error('=== LỖI CHANGE PASSWORD ===', err);
+    res.status(500).json({ msg: 'Lỗi server' });
+  }
+});
+
+// ====================== ✅ ADMIN: CHẶN/UNBLOCK USER ======================
+router.put('/users/:id/toggle-block', protect, admin, async (req, res) => {
+  try {
+    const { isBlocked } = req.body;
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ msg: 'Không tìm thấy user' });
+    }
+
+    // Không cho chặn admin khác
+    if (user.role === 'admin') {
+      return res.status(403).json({ msg: 'Không thể chặn admin' });
+    }
+
+    user.isBlocked = isBlocked;
+    await user.save();
+
+    res.json({ 
+      msg: isBlocked ? 'Chặn user thành công' : 'Bỏ chặn user thành công',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isBlocked: user.isBlocked
+      }
+    });
+  } catch (err) {
+    console.error('Lỗi chặn user:', err);
+    res.status(500).json({ msg: 'Lỗi server' });
+  }
+});
+
+// ====================== ✅ ADMIN: PHÂN QUYỀN USER ======================
+router.put('/users/:id/toggle-role', protect, admin, async (req, res) => {
+  try {
+    const { role } = req.body;
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ msg: 'Không tìm thấy user' });
+    }
+
+    // Không cho tự hạ quyền chính mình
+    if (user._id.toString() === req.user.id) {
+      return res.status(403).json({ msg: 'Không thể thay đổi quyền của chính mình' });
+    }
+
+    if (!['user', 'admin'].includes(role)) {
+      return res.status(400).json({ msg: 'Role không hợp lệ' });
+    }
+
+    user.role = role;
+    await user.save();
+
+    res.json({ 
+      msg: 'Phân quyền thành công',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (err) {
+    console.error('Lỗi phân quyền:', err);
     res.status(500).json({ msg: 'Lỗi server' });
   }
 });
