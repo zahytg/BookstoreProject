@@ -1,5 +1,14 @@
 {
-  "dependencies": {
-    "react-select": "^5.10.2"
+  "name": "bookstore-ecommerce",
+  "version": "1.0.0",
+  "scripts": {
+    "install-all": "npm install && cd server && npm install && cd ../client-customer && npm install && cd ../client-admin && npm install",
+    "server": "cd server && npm run dev",
+    "customer": "cd client-customer && npm run dev",
+    "admin": "cd client-admin && npm run dev",
+    "dev": "concurrently \"npm run server\" \"npm run customer\" \"npm run admin\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
   }
 }

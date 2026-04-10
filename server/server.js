@@ -12,7 +12,9 @@ app.use('/uploads', express.static(uploadsPath));
 
 // CORS
 app.use(cors({
-  origin: ['http://localhost:5173',     // customer app
+  origin: [ 'https://5173-your-repl.replit.app',  // Customer
+            'https://5174-your-repl.replit.app',  // Admin
+            'http://localhost:5173',     // customer app
             'http://localhost:5174',    // admin app
           ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

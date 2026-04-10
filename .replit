@@ -1,0 +1,16 @@
+language = "nodejs"
+
+run = """
+npm run install-all &
+npm run server &
+npm run customer &
+npm run admin
+"""
+
+[ports]
+5000 = { visibility = "public", description = "Backend API" }
+5173 = { visibility = "public", description = "Customer Frontend" }
+5174 = { visibility = "public", description = "Admin Frontend" }
+
+[nix]
+channel = "stable-23_11"
